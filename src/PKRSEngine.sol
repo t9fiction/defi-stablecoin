@@ -15,22 +15,37 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 
 contract PKRSEngine is ReentrancyGuard {
 
-    // Custom errors for more efficient error handling
+    ////////////////////////
+    /// Custom Errors ///
+    ////////////////////////
+
     error PKRSEngine__ZeroAmount();
     error PKRSEngine__InvalidCollateralToken();
     error PKRSEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
 
-    // State variables
+    //////////////////////////
+    /// State Variables ///
+    //////////////////////////
+
     mapping(address token => address priceFeed) private s_priceFeeds; // Mapping of token addresses to price feed addresses
     mapping(address user => mapping(address token => uint256 amount)) private s_collateralDeposited; // User's deposited collateral per token
 
-    // Events
+    ///////////////////////
+    /// Events ///
+    ///////////////////////
+
     event CollateralDeposited(address indexed user, address indexed token, uint256 amount); // Event emitted when collateral is deposited
 
-    // Immutable variables
+    ////////////////////////////
+    /// Immutable Variables ///
+    ////////////////////////////
+
     DecentralizedStableCoin private immutable pkrsToken; // The PKRS token (Decentralized StableCoin)
 
-    // Modifiers
+    //////////////////////
+    /// Modifiers ///
+    //////////////////////
+
     modifier zeroAmount(uint256 _amount) {
         // Ensures the amount is not zero
         if (_amount == 0) {
@@ -46,6 +61,10 @@ contract PKRSEngine is ReentrancyGuard {
         }
         _;
     }
+
+    ///////////////////////////////////////
+    /// Constructor ///
+    ///////////////////////////////////////
 
     /**
      * @dev Constructor to initialize the contract with token and price feed addresses, and PKRS token address.
@@ -69,6 +88,10 @@ contract PKRSEngine is ReentrancyGuard {
         // Set the PKRS token address
         pkrsToken = DecentralizedStableCoin(_PKRSAddress);
     }
+
+    //////////////////////////////////////
+    /// External Functions ///
+    //////////////////////////////////////
 
     /**
      * @dev Deposit collateral and mint PKRS tokens (not yet implemented).
@@ -132,6 +155,10 @@ contract PKRSEngine is ReentrancyGuard {
     function liquidate() external {
         // Implementation to be added
     }
+
+    //////////////////////////////////////
+    /// View Functions ///
+    //////////////////////////////////////
 
     /**
      * @dev Get the health factor of a user's position (not yet implemented).
