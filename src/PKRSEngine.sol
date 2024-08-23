@@ -12,6 +12,8 @@ pragma solidity ^0.8.19;
 
 import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 contract PKRSEngine is ReentrancyGuard {
 
@@ -22,13 +24,23 @@ contract PKRSEngine is ReentrancyGuard {
     error PKRSEngine__ZeroAmount();
     error PKRSEngine__InvalidCollateralToken();
     error PKRSEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
+    error PKRSEngine__TransferFailed();
+    error PKRSEngine__BreaksHealthFactor(uint256 _healthFactor);
+    error PKRSEngine__MintFailed();
 
     //////////////////////////
     /// State Variables ///
     //////////////////////////
 
-    mapping(address token => address priceFeed) private s_priceFeeds; // Mapping of token addresses to price feed addresses
-    mapping(address user => mapping(address token => uint256 amount)) private s_collateralDeposited; // User's deposited collateral per token
+    uint256 private constant ADDITIONAL_FEED_PRECISION = 1e18;
+    uint256 private constant PRECISION = 1e18;
+    uint256 private constant LIQUIDATION_THRESHOLD = 50;
+    uint256 private constant MIN_HEALTH_FACTOR = 1;
+
+    mapping(address token => address priceFeed) private s_priceFeeds;
+    mapping(address user => mapping(address token => uint256 amount)) private s_collateralDeposited;
+    mapping(address user => uint256 amountPKRSMinted) private s_PKRSMinted;
+    address[] private s_collateralTokens;
 
     ///////////////////////
     /// Events ///
@@ -40,13 +52,13 @@ contract PKRSEngine is ReentrancyGuard {
     /// Immutable Variables ///
     ////////////////////////////
 
-    DecentralizedStableCoin private immutable pkrsToken; // The PKRS token (Decentralized StableCoin)
+    DecentralizedStableCoin private immutable i_pkrsToken; // The PKRS token (Decentralized StableCoin)
 
     //////////////////////
     /// Modifiers ///
     //////////////////////
 
-    modifier zeroAmount(uint256 _amount) {
+    modifier nonZeroAmount(uint256 _amount) {
         // Ensures the amount is not zero
         if (_amount == 0) {
             revert PKRSEngine__ZeroAmount();
@@ -84,9 +96,10 @@ contract PKRSEngine is ReentrancyGuard {
         // Map each token to its respective price feed
         for (uint256 i = 0; i < _tokenAddresses.length; i++) {
             s_priceFeeds[_tokenAddresses[i]] = _priceFeedAddresses[i];
+            s_collateralTokens.push(_tokenAddresses[i]);
         }
         // Set the PKRS token address
-        pkrsToken = DecentralizedStableCoin(_PKRSAddress);
+        i_pkrsToken = DecentralizedStableCoin(_PKRSAddress);
     }
 
     //////////////////////////////////////
@@ -110,15 +123,16 @@ contract PKRSEngine is ReentrancyGuard {
         uint256 _amountCollateral
     )
         external
-        zeroAmount(_amountCollateral)
+        nonZeroAmount(_amountCollateral)
         isAllowedCollateralToken(_tokenCollateralAddress)
         nonReentrant
     {
-        // Update the user's collateral balance for the specified token
         s_collateralDeposited[msg.sender][_tokenCollateralAddress] += _amountCollateral;
-
-        // Emit the CollateralDeposited event
         emit CollateralDeposited(msg.sender, _tokenCollateralAddress, _amountCollateral);
+        bool success = IERC20(_tokenCollateralAddress).transferFrom(msg.sender,address(this),_amountCollateral);
+        if(!success){
+            revert PKRSEngine__TransferFailed();
+        }
     }
 
     /**
@@ -138,8 +152,13 @@ contract PKRSEngine is ReentrancyGuard {
     /**
      * @dev Mint PKRS tokens (not yet implemented).
      */
-    function mintPKRS() external {
-        // Implementation to be added
+    function mintPKRS(uint256 _amountPKRSToMint) external nonZeroAmount(_amountPKRSToMint) {
+        s_PKRSMinted[msg.sender] += _amountPKRSToMint;
+        _revertIfHealthFactorIsBroken(msg.sender);
+        bool minted = i_pkrsToken.mint(msg.sender, _amountPKRSToMint);
+        if(!minted){
+            revert PKRSEngine__MintFailed();
+        }
     }
 
     /**
@@ -166,4 +185,41 @@ contract PKRSEngine is ReentrancyGuard {
     function getHealthFactor() external view {
         // Implementation to be added
     }
+
+    //////////////////////////////////////
+    ///  Internal & Private Functions  ///
+    //////////////////////////////////////
+
+    function getAccountCollaterValue(address _user) public view returns(uint256 _collateralValueInPKRS){
+        for (uint i = 0; i < s_collateralTokens.length; i++) {
+            address _token = s_collateralTokens[i];
+            uint256 _amount = s_collateralDeposited[_user][_token];
+            _collateralValueInPKRS = getPKRValue(_token, _amount);
+        }
+    }
+
+    function getPKRValue(address _token, uint256 _amount) public view returns(uint256){
+        AggregatorV3Interface _priceFeed = AggregatorV3Interface(s_priceFeeds[_token]);
+        (,int256 _price,,,) = _priceFeed.latestRoundData();
+        return ((uint256(_price) * ADDITIONAL_FEED_PRECISION) * _amount) / PRECISION ;
+    }
+
+    function _getAccountInformation(address _user) private view returns(uint256 _totalPKRSMinted, uint256 _collateralValueInPKRS){
+        _totalPKRSMinted = s_PKRSMinted[_user];
+        _collateralValueInPKRS = getAccountCollaterValue(_user);
+    }
+
+    function _healthFactor(address _user) private view returns(uint256){
+        (uint256 _totalPKRSMinted, uint256 _collateralValueInPKRS) = _getAccountInformation(_user);
+        uint256 _collateralAdjustedForThreshHold = (_collateralValueInPKRS * LIQUIDATION_THRESHOLD) / 100;
+        return (_collateralAdjustedForThreshHold * PRECISION / _totalPKRSMinted);
+    }
+
+    function _revertIfHealthFactorIsBroken(address _user) internal view {
+        uint256 _userHealtFactor = _healthFactor(_user);
+        if(_userHealtFactor < MIN_HEALTH_FACTOR){
+            revert PKRSEngine__BreaksHealthFactor(_userHealtFactor);
+        }
+    }
+
 }
