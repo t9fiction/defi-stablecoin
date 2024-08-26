@@ -14,6 +14,7 @@ contract PKRSEngineTest is Test {
     DecentralizedStableCoin pkrsToken;
     HelperConfig config;
     address ethUsdpriceFeedAddress;
+    address btcUsdPriceFeedAddress;
     address weth;
     address public USER = makeAddr("user"); // Test user address
     uint256 public constant COLLATERALAMOUNT = 10 ether;
@@ -22,18 +23,37 @@ contract PKRSEngineTest is Test {
     function setUp() public {
         deployer = new DeployStableCoin();
         (pkrsToken, pkrEngine, config) = deployer.run();
-        (ethUsdpriceFeedAddress,, weth,,) = config.activeNetworkConfig();
+        (ethUsdpriceFeedAddress, btcUsdPriceFeedAddress, weth,,) = config.activeNetworkConfig();
 
         ERC20Mock(weth).mint(USER, STARTING_ERC20_BALANCE);
     }
+    address[] public tokenAddresses;
+    address[] public priceFeedAddresses;
 
     // function testConstructorRevertsWithMismatchedArrayLengths() public {
     //     address;
     //     address; // Deliberately mismatched
 
     //     vm.expectRevert(PKRSEngine.PKRSEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength.selector);
-    //     new PKRSEngine(tokens, priceFeeds, address(pkrsToken));
+    //     new PKRSEngine(tokenAddresses, priceFeedAddresses, address(pkrsToken));
     // }
+
+
+    function testRevertsIfTokenLengthDoesntMatchPriceFeeds() public {
+        tokenAddresses.push(weth);
+        priceFeedAddresses.push(ethUsdpriceFeedAddress);
+        priceFeedAddresses.push(btcUsdPriceFeedAddress);
+
+        vm.expectRevert(PKRSEngine.PKRSEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength.selector);
+        new PKRSEngine(tokenAddresses, priceFeedAddresses, address(pkrsToken));
+    }
+
+    function testGetTokenAmountFromUsd() public {
+        // If we want $100 of WETH @ $2000/WETH, that would be 0.05 WETH
+        uint256 expectedWeth = 0.05 ether;
+        uint256 amountWeth = pkrEngine.getTokenAmountFromUsd(weth, 100 ether);
+        assertEq(amountWeth, expectedWeth);
+    }
 
     function testRevertsIfCollateralZero() public {
 

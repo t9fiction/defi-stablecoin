@@ -230,11 +230,7 @@ contract PKRSEngine is ReentrancyGuard {
     /**
      * @dev Liquidate positions (not yet implemented).
      */
-    function liquidate(
-        address collateral,
-        address user,
-        uint256 debtToCover
-    )
+    function liquidate(address collateral, address user, uint256 debtToCover)
         external
         nonZeroAmount(debtToCover)
         nonReentrant
@@ -270,8 +266,26 @@ contract PKRSEngine is ReentrancyGuard {
     /**
      * @dev Get the health factor of a user's position (not yet implemented).
      */
-    function getHealthFactor() external view {
-        // Implementation to be added
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
+    }
+
+    function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (totalDscMinted == 0) return type(uint256).max;
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+        return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
+    }
+
+    function calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
+        external
+        pure
+        returns (uint256)
+    {
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
     }
 
     //////////////////////////////////////
@@ -282,11 +296,11 @@ contract PKRSEngine is ReentrancyGuard {
         for (uint256 i = 0; i < s_collateralTokens.length; i++) {
             address _token = s_collateralTokens[i];
             uint256 _amount = s_collateralDeposited[_user][_token];
-            _collateralValueInPKRS = getPKRValue(_token, _amount);
+            _collateralValueInPKRS = _getPKRValue(_token, _amount);
         }
     }
 
-    function getPKRValue(address _token, uint256 _amount) public view returns (uint256) {
+    function _getPKRValue(address _token, uint256 _amount) internal view returns (uint256) {
         AggregatorV3Interface _priceFeed = AggregatorV3Interface(s_priceFeeds[_token]);
         (, int256 _price,,,) = _priceFeed.latestRoundData();
         return ((uint256(_price) * ADDITIONAL_FEED_PRECISION) * _amount) / PRECISION;
@@ -299,6 +313,61 @@ contract PKRSEngine is ReentrancyGuard {
     {
         _totalPKRSMinted = s_PKRSMinted[_user];
         _collateralValueInPKRS = getAccountCollaterValue(_user);
+    }
+
+    function getPKRValue(
+        address token,
+        uint256 amount // in WEI
+    )
+        external
+        view
+        returns (uint256)
+    {
+        return _getPKRValue(token, amount);
+    }
+
+    function getAccountInformation(address user)
+        external
+        view
+        returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
+    {
+        return _getAccountInformation(user);
+    }
+
+    function getCollateralBalanceOfUser(address user, address token) external view returns (uint256) {
+        return s_collateralDeposited[user][token];
+    }
+
+    function getCollateralTokenPriceFeed(address token) external view returns (address) {
+        return s_priceFeeds[token];
+    }
+
+    function getCollateralTokens() external view returns (address[] memory) {
+        return s_collateralTokens;
+    }
+
+    function getPrecision() external pure returns (uint256) {
+        return PRECISION;
+    }
+
+    function getAdditionalFeedPrecision() external pure returns (uint256) {
+        return ADDITIONAL_FEED_PRECISION;
+    }
+
+    function getLiquidationThreshold() external pure returns (uint256) {
+        return LIQUIDATION_THRESHOLD;
+    }
+
+    function getLiquidationBonus() external pure returns (uint256) {
+        return LIQUIDATION_BONUS;
+    }
+
+    function getLiquidationPrecision() external pure returns (uint256) {
+        return LIQUIDATION_PRECISION;
+    }
+
+    function getMinHealthFactor() external pure returns (uint256) {
+        return MIN_HEALTH_FACTOR;
     }
 
     function _healthFactor(address _user) private view returns (uint256) {

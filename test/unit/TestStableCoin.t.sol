@@ -30,11 +30,12 @@ contract DecentralizedStableCoinTest is Test {
     }
 
     function testBurn() public {
-        vm.prank(owner);
+        vm.startPrank(owner);
         uint256 amount = 1000 * 1e18;
         stableCoin.mint(owner, amount);
         stableCoin.burn(amount);
         assertEq(stableCoin.balanceOf(owner), 0);
+        vm.stopPrank();
     }
 
     function testBurnFailsForNonOwner() public {
